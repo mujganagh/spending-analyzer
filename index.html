@@ -80,6 +80,12 @@
   .analyze-btn:active { transform:scale(0.99); }
   .analyze-btn:disabled { opacity:0.35; cursor:not-allowed; }
 
+  .api-key-wrap { margin-bottom:12px; }
+  .api-key-wrap label { font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted); display:block; margin-bottom:6px; }
+  .api-key-input { width:100%; padding:11px 14px; background:var(--surface); border:1px solid var(--border); border-radius:10px; color:var(--text); font-family:'DM Mono',monospace; font-size:12px; outline:none; transition:border-color 0.2s; }
+  .api-key-input:focus { border-color:var(--accent); }
+  .api-key-input::placeholder { color:var(--muted); }
+
   .privacy-note { font-size:10px; color:var(--muted); text-align:center; margin-top:6px; }
 
   /* ERROR */
@@ -138,13 +144,34 @@
   .txn-row { display:flex; align-items:center; padding:10px 0; border-bottom:1px solid var(--border); gap:10px; font-size:11px; }
   .txn-row:last-child { border-bottom:none; }
   .txn-date { color:var(--muted); width:38px; flex-shrink:0; }
-  .txn-desc { flex:1; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .txn-desc { flex:1; color:var(--text); min-width:0; overflow:hidden; }
+  .txn-desc-main { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .txn-items { display:block; font-size:10px; color:#555; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
   .txn-source { font-size:9px; padding:2px 7px; border-radius:99px; background:#1a1a1e; color:#444; white-space:nowrap; flex-shrink:0; }
   .txn-cat { font-size:10px; padding:3px 8px; border-radius:99px; background:#1c1c20; color:var(--muted); white-space:nowrap; }
+  .txn-cat.editable { cursor:pointer; }
+  .txn-cat.editable:hover { background:#2a2a30; color:var(--text); }
+  .txn-cat-select { font-size:10px; padding:2px 6px; border-radius:99px; background:#1c1c20; color:var(--text); border:1px solid var(--accent); font-family:'DM Mono',monospace; cursor:pointer; outline:none; }
+  .txn-exclude { background:none; border:none; color:#333; cursor:pointer; font-size:14px; padding:0 2px; line-height:1; flex-shrink:0; transition:color 0.15s; }
+  .txn-exclude:hover { color:var(--accent2); }
+  .excluded-notice { font-size:10px; color:var(--muted); margin-bottom:12px; display:flex; align-items:center; gap:10px; }
+  .excluded-notice button { background:none; border:none; color:var(--accent3); font-family:'DM Mono',monospace; font-size:10px; cursor:pointer; padding:0; text-decoration:underline; }
   .txn-amount { color:var(--accent2); white-space:nowrap; font-weight:500; }
 
   .reset-btn { background:none; border:1px solid var(--border); color:var(--muted); padding:10px 22px; border-radius:8px; font-family:'DM Mono',monospace; font-size:11px; cursor:pointer; margin-top:20px; transition:all 0.2s; letter-spacing:0.04em; }
   .reset-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+  /* PDF CONVERTER */
+  .converter-wrap { border:1px solid var(--border); border-radius:14px; padding:26px 28px; margin-bottom:20px; }
+  .converter-wrap .section-label { margin-bottom:14px; }
+  .converter-drop { border:1.5px dashed var(--border); border-radius:10px; padding:28px; text-align:center; cursor:pointer; position:relative; transition:border-color 0.2s; }
+  .converter-drop:hover { border-color:var(--accent); }
+  .converter-drop input { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+  .converter-drop p { font-size:12px; color:var(--muted); }
+  .converter-drop strong { color:var(--text); }
+  .converter-status { margin-top:14px; font-size:11px; color:var(--muted); min-height:18px; }
+  .converter-status.ok { color:var(--c6); }
+  .converter-status.err { color:var(--accent2); }
 </style>
 </head>
 <body>
@@ -154,6 +181,15 @@
     <h1>All your cards,<br><span>one picture.</span></h1>
     <p class="subtitle">Upload statements from every card or bank account — PDF, CSV, or screenshot. Everything gets merged into one combined breakdown.</p>
   </header>
+
+  <div class="converter-wrap">
+    <div class="section-label">Convert PDF → CSV</div>
+    <div class="converter-drop" id="convDrop">
+      <input type="file" id="convInput" accept=".pdf" onchange="convertPdf(this.files[0])">
+      <p>Drop a Chase or Apple Card statement PDF here<br>or <strong>click to browse</strong></p>
+    </div>
+    <div class="converter-status" id="convStatus"></div>
+  </div>
 
   <div id="uploadArea">
     <div class="upload-zone" id="dropZone">
@@ -175,6 +211,11 @@
       <input type="file" accept=".pdf,.csv,.txt,.png,.jpg,.jpeg,.webp" multiple onchange="handleFiles(this.files)">
       + Add another statement
     </button>
+
+    <div class="api-key-wrap">
+      <label for="apiKeyInput">Anthropic API Key — only needed for image files (PNG/JPG)</label>
+      <input type="password" class="api-key-input" id="apiKeyInput" placeholder="sk-ant-... (optional for CSV/TXT)" autocomplete="off">
+    </div>
 
     <div id="errorBox" class="error-box"></div>
     <button class="analyze-btn" id="analyzeBtn" onclick="analyze()" disabled>Add statements to analyze →</button>
@@ -220,6 +261,7 @@
 
     <div class="card">
       <div class="section-label">All transactions</div>
+      <div id="excludedNotice" class="excluded-notice" style="display:none"></div>
       <div class="txn-filter" id="filterBtns"></div>
       <div id="txnList"></div>
     </div>
@@ -233,6 +275,10 @@ let files = []; // [{file, id, name}]
 let allTransactions = [];
 let allSources = [];
 let nextId = 0;
+let amazonOrderMap = {}; // "MM/DD" → [{title, category, amount}]
+let excludedKeys = new Set();
+let activeSourceFilter = 'All';
+let activeCatFilter = 'All';
 
 const dropZone = document.getElementById('dropZone');
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
@@ -323,40 +369,321 @@ function setStatus(id, status, label) {
   el.textContent = label;
 }
 
-async function extractTransactions(file, id) {
-  const ext = file.name.split('.').pop().toLowerCase();
-  const isImage = ['png','jpg','jpeg','webp'].includes(ext);
-  const isPdf = ext === 'pdf';
+function getApiKey() {
+  return document.getElementById('apiKeyInput').value.trim();
+}
 
-  const prompt = `Extract every debit/charge transaction from this bank or credit card statement.
-Return ONLY a JSON array — no markdown, no backticks, no explanation.
-Format: [{"date":"03/01","description":"Sweetgreen","amount":18.50}, ...]
-Rules: positive numbers only, skip credits/payments/refunds/balance transfers, skip if amount unclear.
-Return ONLY the JSON array.`;
+function apiHeaders(extra = {}) {
+  return {
+    'Content-Type': 'application/json',
+    'x-api-key': getApiKey(),
+    'anthropic-version': '2023-06-01',
+    'anthropic-dangerous-direct-browser-access': 'true',
+    ...extra
+  };
+}
 
-  let messages;
-  if (isImage) {
-    const b64 = await fileToBase64(file);
-    const mime = { png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', webp:'image/webp' }[ext];
-    messages = [{ role:'user', content:[{ type:'image', source:{ type:'base64', media_type:mime, data:b64 }},{ type:'text', text:prompt }]}];
-  } else if (isPdf) {
-    const b64 = await fileToBase64(file);
-    messages = [{ role:'user', content:[{ type:'document', source:{ type:'base64', media_type:'application/pdf', data:b64 }},{ type:'text', text:prompt }]}];
-  } else {
-    const text = await fileToText(file);
-    messages = [{ role:'user', content:`${prompt}\n\nStatement:\n${text.slice(0,40000)}` }];
+// ── Local CSV parser ──────────────────────────────────────────────────────────
+
+function parseCSVRows(text) {
+  // Split into rows, handle quoted fields
+  const rows = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const cols = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { inQ = !inQ; }
+      else if (c === ',' && !inQ) { cols.push(cur.trim()); cur = ''; }
+      else { cur += c; }
+    }
+    cols.push(cur.trim());
+    rows.push(cols);
+  }
+  return rows;
+}
+
+function detectColumns(headers) {
+  // Returns {dateIdx, descIdx, amountIdx} or null
+  const h = headers.map(h => h.toLowerCase().replace(/[^a-z]/g, ''));
+  const dateIdx   = h.findIndex(c => /^(transactiondate|date|postdate|txndate)$/.test(c));
+  const descIdx   = h.findIndex(c => /^(description|desc|name|merchant|payee|memo|narrative)$/.test(c));
+  const amountIdx = h.findIndex(c => /^(amount|debit|charge|withdrawal)$/.test(c));
+  const catIdx    = h.findIndex(c => /^(category|categories|type|txntype)$/.test(c));
+  if (dateIdx < 0 || descIdx < 0 || amountIdx < 0) return null;
+  return { dateIdx, descIdx, amountIdx, catIdx };
+}
+
+function localParseCSV(text) {
+  const rows = parseCSVRows(text);
+  if (rows.length < 2) return [];
+
+  const cols = detectColumns(rows[0]);
+  if (!cols) return [];
+
+  const { dateIdx, descIdx, amountIdx, catIdx } = cols;
+  const txns = [];
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const rawAmt = (row[amountIdx] || '').replace(/[$,\s]/g, '');
+    const amount = parseFloat(rawAmt);
+    if (!isFinite(amount) || amount <= 0) continue; // skip credits/zero rows
+
+    const date = (row[dateIdx] || '').trim();
+    const description = (row[descIdx] || '').trim();
+    if (!description) continue;
+
+    const bankCatRaw = catIdx >= 0 ? (row[catIdx] || '').trim() : '';
+    const dm = date.match(/(\d{1,2})[\/\-](\d{1,2})/);
+    txns.push({ date: dm ? `${dm[1].padStart(2,'0')}/${dm[2].padStart(2,'0')}` : date, description, amount, _bankCat: bankCatRaw });
+  }
+  return txns;
+}
+
+// ── Bank-provided category mapping ───────────────────────────────────────────
+
+const BANK_CAT_MAP = {
+  'food & drink': 'Food & Dining', 'dining': 'Food & Dining', 'restaurants': 'Food & Dining',
+  'groceries': 'Groceries', 'supermarkets': 'Groceries',
+  'shopping': 'Shopping', 'merchandise': 'Shopping',
+  'entertainment': 'Entertainment',
+  'travel': 'Travel', 'airlines': 'Travel', 'hotels': 'Travel',
+  'health & wellness': 'Health & Wellness', 'medical': 'Health & Wellness', 'pharmacy': 'Health & Wellness',
+  'personal': 'Personal Care', 'personal care': 'Personal Care',
+  'bills & utilities': 'Utilities', 'utilities': 'Utilities',
+  'automotive': 'Transport', 'gas': 'Transport', 'transportation': 'Transport',
+  'home': 'Rent & Housing',
+  'subscriptions': 'Subscriptions',
+  'education': 'Other', 'gifts & donations': 'Other', 'professional services': 'Other',
+  'fees & adjustments': null, 'payments': null, 'transfers': null, 'other': null,
+};
+
+function mapBankCategory(raw) {
+  if (!raw) return null;
+  return BANK_CAT_MAP[raw.toLowerCase().trim()] ?? null;
+}
+
+// ── User overrides (localStorage) ────────────────────────────────────────────
+
+const OVERRIDES_KEY = 'spendingAnalyzer_catOverrides';
+
+function merchantKey(desc) {
+  return cleanDesc(desc).toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 40);
+}
+
+function getOverrides() {
+  try { return JSON.parse(localStorage.getItem(OVERRIDES_KEY) || '{}'); }
+  catch { return {}; }
+}
+
+function saveOverride(desc, category) {
+  const o = getOverrides();
+  o[merchantKey(desc)] = category;
+  localStorage.setItem(OVERRIDES_KEY, JSON.stringify(o));
+}
+
+function checkOverride(desc) {
+  return getOverrides()[merchantKey(desc)] || null;
+}
+
+// ── Local categoriser ─────────────────────────────────────────────────────────
+
+// Strips Apple Pay noise, POS prefixes, phone numbers, store codes
+function cleanDesc(raw) {
+  return raw
+    .replace(/apple\s*pay\s*ending\s*in[\s\d]*/gi, '')
+    .replace(/^aplpay\s+/i, '')
+    .replace(/^sq\s*\*\s*/i, '')       // Square
+    .replace(/^tst\*\s*/i, '')         // Toast
+    .replace(/^sp\s*\*?\s*/i, '')      // Shopify (with or without *)
+    .replace(/^bt\*\s*/i, '')          // BT* (payment processor)
+    .replace(/^pp\s*\*\s*/i, '')       // PayPal
+    .replace(/^in\s*\*\s*/i, '')       // Invoice/misc *
+    .replace(/\s+\d{3}[.\-\s]\d{3}[.\-\s]\d{4}.*$/, '')  // phone numbers
+    .replace(/\s+\d{12,}.*$/, '')      // long card/ref numbers
+    .replace(/\s+#[\w]+\s*$/, '')      // store numbers like #10487
+    .replace(/\s{2,}.*$/, '')          // city/state columns (2+ spaces = new column in PDF)
+    .trim();
+}
+
+const SKIP_RE = /interest\s*charge|late\s*fee|annual\s*fee|foreign\s*transaction|minimum\s*interest|returned\s*payment/i;
+
+const RULES = [
+  // Toast POS prefix always means a restaurant
+  ['Food & Dining',    /^(?:aplpay\s+)?tst\*/i],
+
+  ['Coffee',           /coffee|starbucks|dunkin|espresso|philz|blue\s*bottle|peet|la\s*colombe|gregorys|intelligentsia|cafe\s+grumpy|birch\s+coffee|blank\s*street|toby|third\s+rail|verve|counterpart/i],
+
+  ['Food & Dining',    /restaurant|dining|doordash|grubhub|uber\s*eats|seamless|postmates|chipotle|sweetgreen|shake\s*shack|mcdonald|in.n.out|burger|pizza|sushi|taco|diner|bistro|grill|kitchen|eatery|panera|subway|dominos|chick.fil|wendys|kfc|levain|bakery|bagel|deli|ramen|noodle|burrito|wings|bbq|barbecue|thai|chinese|japanese|italian|indian|mexican|cafe|caffe|brasserie|buvette|trattoria|osteria|food\s*hall|busy\s*corner|silo\s*brooklyn/i],
+
+  ['Groceries',        /wholefds|whole\s*foods|trader\s*joe|safeway|kroger|costco|walmart|stop\s*&\s*shop|grocery|\bmarket\b|sprouts|aldi|publix|wegmans|heb|fresh\s*market|key\s*food|fairway|morton\s*williams|westside\s*market|fruitstand|fruit\s*stand|produce|green\s*apple\s*mkt|\btarget\b/i],
+
+  ['Transport',        /waymo|(?<!uber\s)(?<!door)lyft|(?<!\w)uber(?!\s*eats)|\btaxi\b|transit|\bmta\b|\bbart\b|\bpath\b|metro(?!politan)|caltrain|amtrak|parking|garage|\bshell\b|exxon|chevron|\bbp\b|sunoco|speedway|citgo|nj\s*transit/i],
+
+  ['Travel',           /airbnb|hotel|marriott|hilton|hyatt|westin|sheraton|everline|delta\s*air|united\s*air|southwest\s*air|american\s*air|jetblue|spirit\s*air|frontier|alaska\s*air|expedia|booking\.com|vrbo|kayak|priceline|\bresort\b|\binn\b|\bmotel\b|\blodge\b/i],
+
+  ['Subscriptions',    /netflix|spotify|hulu|disney\+|apple\.com\/bill|itunes|google\s*play|amazon\s*prime|prime\s*video|youtube\s*prem|twitch|patreon|dropbox|icloud|microsoft\s*365|xbox\s*game|playstation|adobe|github|openai|chatgpt|soundcloud|substack|notion|figma|canva|duolingo|grammarly|classpass/i],
+
+  ['Shopping',         /amazon(?!\s*prime)|\bamzn\b|ebay|etsy|\bzara\b|\bh&m\b|old\s*navy|banana\s*republic|nordstrom|macys|bloomingdale|best\s*buy|home\s*depot|lowes|ikea|wayfair|quince|onequince|buck\s*mason|sur\s*la\s*table|plan\s*fee|\brei\b|flexispot|thuma|\bbook(?:s|shop|store)?\b|get100/i],
+
+  ['Nightlife & Bars', /axs\.com|dice\.fm|bowery|rough\s*trade|brooklyn\s*steel|music\s*hall|\bbar\b|\bpub\b|brewery|taproom|lounge|nightclub|cocktail|tavern|liquor|wine\s*shop|bottle\s*service/i],
+
+  ['Entertainment',    /movie|cinema|\bamc\b|\bregal\b|theater|theatre|ticketmaster|stubhub|eventbrite|museum|bowling|arcade|comedy/i],
+
+  ['Health & Wellness',/cvs|walgreens|rite\s*aid|pharmacy|\bgym\b|fitness|equinox|peloton|planet\s*fitness|yoga|pilates|\bdoctor\b|dental|vision|\bmedical\b|\bhealth\b|therapy|therapist|counseling|exposure\s*therapy/i],
+
+  ['Personal Care',    /salon|haircut|barber|\bspa\b|nail\s*(?:salon|bar)|beauty|sephora|ulta|threading|waxing|blowout/i],
+
+  ['Utilities',        /con\s*ed|pge|\belectric\b|utility|water\s*bill|internet|comcast|xfinity|verizon|at&t|t-mobile|spectrum|\bcable\b/i],
+
+  ['Rent & Housing',   /rent|mortgage|\bhoa\b|property\s*mgmt|storage\s*unit/i],
+];
+
+function categorize(rawDescription) {
+  if (SKIP_RE.test(rawDescription)) return null; // signal to skip
+  // Test original first (catches TST* prefix etc.), then cleaned version
+  const cleaned = cleanDesc(rawDescription);
+  for (const [cat, re] of RULES) {
+    if (re.test(rawDescription) || re.test(cleaned)) return cat;
+  }
+  return 'Other';
+}
+
+// ── Insight generator ─────────────────────────────────────────────────────────
+
+function generateInsights(transactions, categories) {
+  const insights = [];
+  const sorted = [...categories].sort((a, b) => b.amount - a.amount);
+  const total = categories.reduce((s, c) => s + c.amount, 0);
+
+  if (sorted[0]) {
+    insights.push(`${sorted[0].name} is your biggest category at $${sorted[0].amount.toFixed(2)} (${((sorted[0].amount/total)*100).toFixed(0)}% of total).`);
   }
 
+  // Find most frequent merchant (skip transit/commute — always high-frequency by nature)
+  const SKIP_FREQ = /\bmta\b|subway|metro|transit|caltrain|bart|path\b|nj\s*transit/i;
+  const freq = {};
+  transactions.forEach(t => {
+    if (t.category === 'Transport' || SKIP_FREQ.test(t.description)) return;
+    const key = cleanDesc(t.description).split(/\s+/).slice(0,2).join(' ');
+    freq[key] = (freq[key] || 0) + 1;
+  });
+  const topMerchant = Object.entries(freq).sort((a,b) => b[1]-a[1])[0];
+  if (topMerchant && topMerchant[1] > 1) {
+    insights.push(`"${topMerchant[0]}" appears ${topMerchant[1]} times — your most frequent merchant.`);
+  }
+
+  // Average transaction
+  if (transactions.length) {
+    const avg = total / transactions.length;
+    insights.push(`Average transaction is $${avg.toFixed(2)} across ${transactions.length} charges.`);
+  }
+
+  // Top 2 categories share
+  if (sorted[1]) {
+    const share = ((sorted[0].amount + sorted[1].amount) / total * 100).toFixed(0);
+    insights.push(`${sorted[0].name} and ${sorted[1].name} together account for ${share}% of spending.`);
+  }
+
+  return insights;
+}
+
+// ── Amazon order history ──────────────────────────────────────────────────────
+
+// Amazon "Items" report CSV: Order Date, Title, Category, Item Total (+ others)
+const AMAZON_CAT_MAP = {
+  'books': 'Entertainment', 'audible': 'Entertainment',
+  'music': 'Entertainment', 'video_games': 'Entertainment', 'movies_tv': 'Entertainment', 'digital_video': 'Entertainment',
+  'grocery': 'Groceries', 'fresh': 'Groceries',
+  'health_and_beauty': 'Health & Wellness', 'drugstore': 'Health & Wellness', 'personal_care': 'Personal Care',
+  'apparel': 'Shopping', 'shoes': 'Shopping', 'jewelry': 'Shopping', 'luggage': 'Shopping',
+  'electronics': 'Shopping', 'computers': 'Shopping', 'camera': 'Shopping', 'wireless': 'Shopping',
+  'home': 'Shopping', 'kitchen': 'Shopping', 'tools': 'Shopping', 'garden': 'Shopping', 'pet_products': 'Shopping',
+  'sports': 'Shopping', 'toys': 'Shopping', 'office_products': 'Shopping', 'automotive': 'Transport',
+};
+
+function looksLikeAmazonOrders(text) {
+  const firstLine = text.split(/\r?\n/)[0].toLowerCase();
+  return firstLine.includes('order id') && (firstLine.includes('title') || firstLine.includes('asin'));
+}
+
+function loadAmazonOrders(text) {
+  const rows = parseCSVRows(text);
+  if (rows.length < 2) return;
+  const h = rows[0].map(c => c.toLowerCase().replace(/[^a-z_]/g, ''));
+  const dateIdx  = h.findIndex(c => c.includes('orderdate') || c === 'date');
+  const titleIdx = h.findIndex(c => c === 'title');
+  const catIdx   = h.findIndex(c => c === 'category');
+  const amtIdx   = h.findIndex(c => c.includes('itemtotal') || c.includes('total'));
+  if (dateIdx < 0 || titleIdx < 0) return;
+
+  amazonOrderMap = {};
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const title = (row[titleIdx] || '').trim();
+    if (!title) continue;
+    const rawDate = (row[dateIdx] || '').trim();
+    const dm = rawDate.match(/(\d{1,2})[\/\-](\d{1,2})/);
+    if (!dm) continue;
+    const key = `${dm[1].padStart(2,'0')}/${dm[2].padStart(2,'0')}`;
+    const cat  = catIdx >= 0 ? (row[catIdx] || '').trim().toLowerCase().replace(/\s+/g,'_') : '';
+    const amt  = amtIdx >= 0 ? parseFloat((row[amtIdx]||'').replace(/[$,]/g,'')) || 0 : 0;
+    if (!amazonOrderMap[key]) amazonOrderMap[key] = [];
+    amazonOrderMap[key].push({ title: title.slice(0, 60), category: cat, amount: amt });
+  }
+}
+
+function enrichAmazonTxn(t) {
+  if (!/amazon|amzn/i.test(t.description)) return;
+  if (!Object.keys(amazonOrderMap).length) return;
+
+  // Check transaction date ±3 days (same month only for simplicity)
+  const [mm, dd] = (t.date || '').split('/').map(Number);
+  if (!mm || !dd) return;
+
+  const candidates = [];
+  for (let offset = -3; offset <= 3; offset++) {
+    const key = `${String(mm).padStart(2,'0')}/${String(dd + offset).padStart(2,'0')}`;
+    if (amazonOrderMap[key]) candidates.push(...amazonOrderMap[key]);
+  }
+  if (!candidates.length) return;
+
+  const titles = [...new Set(candidates.map(o => o.title))].slice(0, 3);
+  t._amazonItems = titles;
+
+  // Use Amazon category if available and not already categorized as Shopping
+  const firstCat = candidates[0].category;
+  if (firstCat && AMAZON_CAT_MAP[firstCat]) t._amazonCategory = AMAZON_CAT_MAP[firstCat];
+}
+
+// ── Image extraction via API ──────────────────────────────────────────────────
+
+async function extractFromImage(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const b64 = await fileToBase64(file);
+  const mime = { png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', webp:'image/webp' }[ext];
+  const prompt = `Extract every debit/charge transaction from this statement image.
+Return ONLY a JSON array — no markdown, no backticks.
+Format: [{"date":"03/01","description":"Sweetgreen","amount":18.50}, ...]
+Positive numbers only, skip credits/refunds/payments.`;
   const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method:'POST', headers:{ 'Content-Type':'application/json' },
-    body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:4000, messages })
+    method: 'POST', headers: apiHeaders(),
+    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4000,
+      messages: [{ role:'user', content:[
+        { type:'image', source:{ type:'base64', media_type:mime, data:b64 }},
+        { type:'text', text:prompt }
+      ]}]
+    })
   });
   const d = await res.json();
   if (d.error) throw new Error(d.error.message);
   const raw = d.content?.map(b => b.text||'').join('') || '';
-  const clean = raw.replace(/```json|```/g,'').trim();
-  return JSON.parse(clean);
+  return JSON.parse(raw.replace(/```json|```/g,'').trim());
 }
+
+// ── Main analyze ──────────────────────────────────────────────────────────────
 
 async function analyze() {
   const btn = document.getElementById('analyzeBtn');
@@ -371,67 +698,85 @@ async function analyze() {
   results.classList.remove('active');
 
   try {
-    // Process each file, update status as we go
     const allTxnsBySource = [];
 
     for (let i = 0; i < files.length; i++) {
       const { file, id, name } = files[i];
+      const ext = name.split('.').pop().toLowerCase();
+      const isImage = ['png','jpg','jpeg','webp'].includes(ext);
+
       document.getElementById('loadingText').textContent = `Processing ${name}`;
       document.getElementById('loadingSub').textContent = `${i+1} of ${files.length} statements`;
       setStatus(id, 'processing', 'reading…');
 
       try {
-        const txns = await extractTransactions(file, id);
-        const sourceName = name.replace(/\.[^.]+$/, ''); // strip extension
+        let txns;
+        if (isImage) {
+          if (!getApiKey()) throw new Error(`API key required for image file "${name}". Use CSV instead or enter a key.`);
+          txns = await extractFromImage(file);
+        } else {
+          const text = await fileToText(file);
+          if (looksLikeAmazonOrders(text)) {
+            loadAmazonOrders(text);
+            setStatus(id, 'done', 'orders indexed');
+            continue; // not a transaction file
+          }
+          txns = localParseCSV(text);
+          if (txns.length === 0) throw new Error(`Could not parse columns in "${name}". Expected headers: Date, Description, Amount.`);
+        }
+
+        const sourceName = name.replace(/\.[^.]+$/, '');
         txns.forEach(t => t.source = sourceName);
         allTxnsBySource.push({ source: sourceName, txns });
         setStatus(id, 'done', `${txns.length} txns`);
       } catch (e) {
         setStatus(id, 'error', 'failed');
-        // continue with other files
+        throw e; // surface the specific error
       }
     }
 
     const combinedTxns = allTxnsBySource.flatMap(s => s.txns);
-    if (combinedTxns.length === 0) throw new Error('No transactions could be extracted from any file.');
+    if (combinedTxns.length === 0) throw new Error('No transactions found. Check that your CSV has Date, Description, and Amount columns.');
 
-    // Pass 2: categorize + summarize all combined
-    document.getElementById('loadingText').textContent = 'Building combined breakdown';
+    // Local categorize (filter out interest/fee lines)
+    document.getElementById('loadingText').textContent = 'Categorizing transactions';
     document.getElementById('loadingSub').textContent = `${combinedTxns.length} total transactions`;
 
-    const summarizePrompt = `Given these transactions from multiple credit card/bank statements, categorize each one and return a combined summary.
-Transactions: ${JSON.stringify(combinedTxns)}
+    combinedTxns.forEach(t => enrichAmazonTxn(t));
 
-Categories: Food & Dining, Groceries, Transport, Shopping, Nightlife & Bars, Subscriptions, Utilities, Health & Wellness, Entertainment, Travel, Rent & Housing, Coffee, Personal Care, Other.
-
-Return ONLY this JSON (no markdown, no backticks):
-{
-  "total": 1234.56,
-  "transaction_count": 25,
-  "period": "March 2024",
-  "days_in_period": 31,
-  "categories": [{"name":"Food & Dining","amount":320.50}],
-  "transactions": [{"date":"03/01","description":"Sweetgreen","amount":18.50,"category":"Food & Dining","source":"Chase Sapphire"}],
-  "insights": ["Insight 1 with specific numbers","Insight 2","Insight 3","Insight 4"]
-}
-insights: 3-5 specific, honest observations about spending patterns across all cards. Return ONLY valid JSON.`;
-
-    const res2 = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST', headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:4000, messages:[{ role:'user', content:summarizePrompt }]})
+    const categorized = combinedTxns.filter((t, i) => {
+      const keywordCat = categorize(t.description);
+      const cat = checkOverride(t.description)
+               ?? (keywordCat !== 'Other' ? keywordCat : null)
+               ?? mapBankCategory(t._bankCat)
+               ?? t._amazonCategory
+               ?? keywordCat;
+      if (cat === null) return false; // skip interest charges etc.
+      t.category = cat;
+      t._idx = i;
+      return true;
     });
-    const d2 = await res2.json();
-    if (d2.error) throw new Error(d2.error.message);
-    const raw2 = d2.content?.map(b => b.text||'').join('') || '';
-    const clean2 = raw2.replace(/```json|```/g,'').trim();
-    const parsed = JSON.parse(clean2);
+    // Re-index after filter
+    categorized.forEach((t, i) => { t._idx = i; });
 
-    // Attach source names from original extraction
-    parsed.transactions = parsed.transactions || combinedTxns.map(t => ({...t, category:'Other'}));
-    allSources = [...new Set(combinedTxns.map(t => t.source))];
+    // Build summary
+    const catMap = {};
+    categorized.forEach(t => { catMap[t.category] = (catMap[t.category]||0) + t.amount; });
+    const categories = Object.entries(catMap).map(([name, amount]) => ({ name, amount }));
+    const total = categorized.reduce((s, t) => s + t.amount, 0);
+
+    // Infer period from dates
+    const dates = categorized.map(t => t.date).filter(Boolean).sort();
+    const period = dates.length ? `${dates[0]} – ${dates[dates.length-1]}` : 'this period';
+
+    allSources = [...new Set(categorized.map(t => t.source))];
 
     loading.classList.remove('active');
-    renderResults(parsed);
+    renderResults({
+      total, transaction_count: categorized.length, period, categories,
+      transactions: categorized,
+      insights: generateInsights(categorized, categories)
+    });
     results.classList.add('active');
 
   } catch (err) {
@@ -445,44 +790,89 @@ insights: 3-5 specific, honest observations about spending patterns across all c
 
 const catColors = ['--c0','--c1','--c2','--c3','--c4','--c5','--c6','--c7'];
 
-function renderResults(data) {
-  allTransactions = data.transactions || [];
+// ── txn key + exclusion helpers ───────────────────────────────────────────────
 
-  document.getElementById('totalSpent').textContent = '$' + (data.total||0).toFixed(2);
-  document.getElementById('txnCount').textContent = allTransactions.length + ' transactions';
-  document.getElementById('cardCount').textContent = files.length;
-  document.getElementById('periodLabel').textContent = data.period || 'this period';
+function txnKey(t) { return `${t.date}|${t.description}|${t.amount}`; }
 
-  const sorted = [...(data.categories||[])].sort((a,b) => b.amount - a.amount);
-  if (sorted[0]) {
-    document.getElementById('biggestCat').textContent = sorted[0].name;
-    document.getElementById('biggestAmt').textContent = '$' + sorted[0].amount.toFixed(2);
+function excludeTxn(idx) {
+  const t = allTransactions[idx];
+  if (!t) return;
+  excludedKeys.add(txnKey(t));
+  refreshDisplay();
+}
+
+function restoreAll() {
+  excludedKeys.clear();
+  refreshDisplay();
+}
+
+// ── Central display refresh ───────────────────────────────────────────────────
+
+function refreshDisplay() {
+  // 1. Apply source filter + exclusions
+  let base = allTransactions.filter(t => !excludedKeys.has(txnKey(t)));
+  if (activeSourceFilter !== 'All') base = base.filter(t => t.source === activeSourceFilter);
+
+  const total = base.reduce((s, t) => s + t.amount, 0);
+
+  // Update stats
+  document.getElementById('totalSpent').textContent = '$' + total.toFixed(2);
+  document.getElementById('txnCount').textContent = base.length + ' transactions';
+
+  const catMap = {};
+  base.forEach(t => { catMap[t.category] = (catMap[t.category]||0) + t.amount; });
+  const catSorted = Object.entries(catMap).sort((a,b) => b[1]-a[1]);
+  if (catSorted[0]) {
+    document.getElementById('biggestCat').textContent = catSorted[0][0];
+    document.getElementById('biggestAmt').textContent = '$' + catSorted[0][1].toFixed(2);
   }
 
-  // Source tabs
+  renderCategories(base, total);
+  renderFilterBtns(base, activeCatFilter);
+
+  // 2. Apply category filter on top
+  const forList = activeCatFilter === 'All' ? base : base.filter(t => t.category === activeCatFilter);
+  renderTxns(forList);
+
+  // 3. Excluded notice
+  const notice = document.getElementById('excludedNotice');
+  if (excludedKeys.size > 0) {
+    notice.style.display = 'flex';
+    notice.innerHTML = `${excludedKeys.size} transaction${excludedKeys.size > 1 ? 's' : ''} excluded from totals <button onclick="restoreAll()">restore all</button>`;
+  } else {
+    notice.style.display = 'none';
+  }
+}
+
+function renderResults(data) {
+  allTransactions = data.transactions || [];
+  activeSourceFilter = 'All';
+  activeCatFilter = 'All';
+  excludedKeys.clear();
+
+  document.getElementById('cardCount').textContent = files.filter(f => !['csv','txt'].includes(f.name.split('.').pop().toLowerCase()) || true).length;
+  document.getElementById('periodLabel').textContent = data.period || 'this period';
+
+  // Source tabs (static — don't change on filter)
   const tabs = document.getElementById('sourceTabs');
   tabs.innerHTML = '';
   if (allSources.length > 1) {
     tabs.innerHTML = `<button class="source-tab active" onclick="filterBySource('All',this)">All cards</button>`;
     allSources.forEach(s => {
-      tabs.innerHTML += `<button class="source-tab" onclick="filterBySource('${s}',this)">${s}</button>`;
+      tabs.innerHTML += `<button class="source-tab" onclick="filterBySource('${escHtml(s)}',this)">${escHtml(s)}</button>`;
     });
   }
 
-  renderCategories(allTransactions, data.total);
   renderInsights(data.insights);
-  renderFilterBtns(allTransactions);
-  renderTxns(allTransactions);
+  refreshDisplay();
 }
 
 function filterBySource(source, btn) {
   document.querySelectorAll('.source-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  const txns = source === 'All' ? allTransactions : allTransactions.filter(t => t.source === source);
-  const total = txns.reduce((sum, t) => sum + (t.amount||0), 0);
-  renderCategories(txns, total);
-  renderFilterBtns(txns);
-  renderTxns(txns);
+  activeSourceFilter = source;
+  activeCatFilter = 'All';
+  refreshDisplay();
 }
 
 function renderCategories(txns, total) {
@@ -524,20 +914,24 @@ function renderInsights(insights) {
   });
 }
 
-function renderFilterBtns(txns) {
+function renderFilterBtns(txns, selectedCat = 'All') {
   const cats = [...new Set(txns.map(t => t.category))];
   const fb = document.getElementById('filterBtns');
-  fb.innerHTML = `<button class="filter-btn active" onclick="filterTxns('All',this)">All</button>`;
+  fb.innerHTML = `<button class="filter-btn ${selectedCat==='All'?'active':''}" onclick="filterTxns('All',this)">All</button>`;
   cats.forEach(c => {
-    fb.innerHTML += `<button class="filter-btn" onclick="filterTxns('${c}',this)">${c}</button>`;
+    fb.innerHTML += `<button class="filter-btn ${selectedCat===c?'active':''}" onclick="filterTxns('${escHtml(c)}',this)">${escHtml(c)}</button>`;
   });
 }
 
 function filterTxns(cat, btn) {
   document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  const filtered = cat === 'All' ? allTransactions : allTransactions.filter(t => t.category === cat);
-  renderTxns(filtered);
+  activeCatFilter = cat;
+  refreshDisplay();
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function renderTxns(txns) {
@@ -545,18 +939,183 @@ function renderTxns(txns) {
   list.innerHTML = '';
   txns.forEach(t => {
     list.innerHTML += `
-      <div class="txn-row">
-        <span class="txn-date">${t.date||'—'}</span>
-        <span class="txn-desc">${t.description}</span>
-        ${allSources.length > 1 ? `<span class="txn-source">${(t.source||'').split(' ').slice(-1)[0]}</span>` : ''}
-        <span class="txn-cat">${t.category}</span>
+      <div class="txn-row" data-idx="${t._idx}">
+        <span class="txn-date">${escHtml(t.date||'—')}</span>
+        <span class="txn-desc">
+          <span class="txn-desc-main">${escHtml(t.description)}</span>
+          ${t._amazonItems ? `<span class="txn-items">↳ ${escHtml(t._amazonItems.join(' · '))}</span>` : ''}
+        </span>
+        ${allSources.length > 1 ? `<span class="txn-source">${escHtml((t.source||'').split(' ').slice(-1)[0])}</span>` : ''}
+        <span class="txn-cat editable" onclick="editCategory(${t._idx})" title="Click to recategorize">${escHtml(t.category)}</span>
         <span class="txn-amount">$${(t.amount||0).toFixed(2)}</span>
+        <button class="txn-exclude" onclick="excludeTxn(${t._idx})" title="Exclude from totals">×</button>
       </div>`;
   });
 }
 
+const ALL_CATS = ['Coffee','Entertainment','Food & Dining','Groceries','Health & Wellness',
+  'Nightlife & Bars','Other','Personal Care','Rent & Housing','Shopping',
+  'Subscriptions','Transport','Travel','Utilities'];
+
+function editCategory(idx) {
+  const row = document.querySelector(`.txn-row[data-idx="${idx}"]`);
+  if (!row) return;
+  const badge = row.querySelector('.txn-cat');
+  const t = allTransactions[idx];
+  if (!badge || !t) return;
+
+  const sel = document.createElement('select');
+  sel.className = 'txn-cat-select';
+  ALL_CATS.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c; opt.textContent = c; opt.selected = c === t.category;
+    sel.appendChild(opt);
+  });
+  badge.replaceWith(sel);
+  sel.focus();
+
+  let applied = false;
+  function apply() {
+    if (applied) return;
+    applied = true;
+    const newCat = sel.value;
+    saveOverride(t.description, newCat);
+    t.category = newCat;
+    const newBadge = document.createElement('span');
+    newBadge.className = 'txn-cat editable';
+    newBadge.title = 'Click to recategorize';
+    newBadge.onclick = () => editCategory(idx);
+    newBadge.textContent = newCat;
+    sel.replaceWith(newBadge);
+    refreshDisplay();
+  }
+  sel.addEventListener('change', apply);
+  sel.addEventListener('blur', () => { if (!applied) { applied = true; sel.replaceWith(badge); } });
+}
+
+// ── PDF → CSV converter ──────────────────────────────────────────────────────
+
+const convDrop = document.getElementById('convDrop');
+convDrop.addEventListener('dragover', e => { e.preventDefault(); convDrop.style.borderColor = 'var(--accent)'; });
+convDrop.addEventListener('dragleave', () => convDrop.style.borderColor = '');
+convDrop.addEventListener('drop', e => { e.preventDefault(); convDrop.style.borderColor = ''; const f = e.dataTransfer.files[0]; if (f) convertPdf(f); });
+
+async function loadPdfJs() {
+  if (window.pdfjsLib) return;
+  await new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
+function parseChaseLines(lines) {
+  // Format: MM/DD  DESCRIPTION  [MM/DD]  AMOUNT
+  const rows = [['Date', 'Description', 'Amount']];
+  const re = /^(\d{2}\/\d{2})\s+(.+?)\s+(?:\d{2}\/\d{2}\s+)?([\d,]+\.\d{2})$/;
+  for (const line of lines) {
+    const m = line.match(re);
+    if (!m) continue;
+    const desc = m[2].replace(/\s+/g, ' ').trim();
+    if (/payment|credit|refund|return/i.test(desc)) continue;
+    rows.push([m[1], desc, m[3].replace(/,/g, '')]);
+  }
+  return rows;
+}
+
+function parseAppleCardLines(lines) {
+  // Format: MM/DD/YYYY  MERCHANT + ADDRESS  2%  $DAILY_CASH  $AMOUNT
+  const rows = [['Date', 'Description', 'Amount']];
+  const re = /^(\d{2}\/\d{2}\/\d{4})\s+(.+?)\s+[23]%\s+\$[\d.]+\s+\$([\d,.]+)$/;
+  let inTransactions = false;
+
+  for (const line of lines) {
+    const lo = line.toLowerCase().trim();
+    if (lo === 'transactions') { inTransactions = true; continue; }
+    if (/^(payments|interest charged|daily cash|legal)/.test(lo)) { inTransactions = false; continue; }
+    if (!inTransactions) continue;
+    if (/daily\s*cash\s*at/i.test(line)) continue; // skip cashback sub-lines
+
+    const m = line.match(re);
+    if (!m) continue;
+
+    // Strip address: remove "ZIP STATE USA" and everything before a clear street number
+    let desc = m[2]
+      .replace(/\s+\d{5}[\s-]?\d*\s*[A-Z]{2}\s+USA\s*$/i, '')  // "10012 NY USA"
+      .replace(/[A-Z]{2}\d{5}\s+[A-Z]{2}\s+USA\s*$/i, '')       // "SAN FRANCISCO94123 CA USA" (PDF artifact)
+      .replace(/\s+[A-Z]{2}\s+USA\s*$/i, '')                     // remaining "NY USA"
+      .replace(/\s+/g, ' ').trim();
+
+    const date = m[1].slice(0, 5); // "03/03/2026" → "03/03"
+    rows.push([date, desc, m[3].replace(/,/g, '')]);
+  }
+  return rows;
+}
+
+async function convertPdf(file) {
+  const status = document.getElementById('convStatus');
+  status.className = 'converter-status';
+  status.textContent = 'Reading PDF…';
+
+  try {
+    await loadPdfJs();
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+
+    // Extract all text items with coordinates across all pages
+    const allLines = [];
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+
+      // Group text items by rounded Y coordinate (same line ≈ within 3 units)
+      const byY = {};
+      for (const item of content.items) {
+        const y = Math.round(item.transform[5] / 3) * 3;
+        if (!byY[y]) byY[y] = [];
+        byY[y].push({ x: item.transform[4], text: item.str });
+      }
+
+      // Sort lines top-to-bottom (higher Y = higher on page in PDF coords)
+      const sorted = Object.entries(byY).sort((a, b) => b[0] - a[0]);
+      for (const [, items] of sorted) {
+        const line = items.sort((a, b) => a.x - b.x).map(i => i.text).join(' ').trim();
+        if (line) allLines.push(line);
+      }
+    }
+
+    const fullText = allLines.join(' ');
+    const isAppleCard = /apple\s*card|goldman\s*sachs/i.test(fullText);
+    const rows = isAppleCard ? parseAppleCardLines(allLines) : parseChaseLines(allLines);
+
+    if (rows.length <= 1) {
+      status.className = 'converter-status err';
+      status.textContent = 'No transactions found — supported formats: Chase, Apple Card.';
+      return;
+    }
+
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = file.name.replace('.pdf', '.csv');
+    a.click();
+    URL.revokeObjectURL(a.href);
+
+    status.className = 'converter-status ok';
+    status.textContent = `✓ Downloaded ${rows.length - 1} transactions as CSV`;
+  } catch (e) {
+    status.className = 'converter-status err';
+    status.textContent = `Error: ${e.message}`;
+  }
+}
+
 function resetAll() {
-  files = []; nextId = 0; allTransactions = []; allSources = [];
+  files = []; nextId = 0; allTransactions = []; allSources = []; amazonOrderMap = {};
+  excludedKeys.clear(); activeSourceFilter = 'All'; activeCatFilter = 'All';
   document.getElementById('fileList').innerHTML = '';
   document.getElementById('fileInput').value = '';
   document.getElementById('results').classList.remove('active');
