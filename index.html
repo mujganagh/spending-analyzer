@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spending Analyzer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d0d0f; --surface: #141416; --border: #222226;
+    --text: #f0ede8; --muted: #555; --accent: #c8f060;
+    --accent2: #ff6b4a; --accent3: #60c8f0;
+    --c0:#c8f060;--c1:#ff6b4a;--c2:#60c8f0;--c3:#f0a060;
+    --c4:#c060f0;--c5:#f060a0;--c6:#60f0a0;--c7:#f0e060;
+  }
+
+  body { background:var(--bg); color:var(--text); font-family:'DM Mono',monospace; min-height:100vh; padding:40px 20px 80px; }
+  .container { max-width:780px; margin:0 auto; }
+
+  header { margin-bottom:44px; }
+  .eyebrow { font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; }
+  h1 { font-family:'Syne',sans-serif; font-size:clamp(28px,5vw,46px); font-weight:800; line-height:1.05; }
+  h1 span { color:var(--accent); }
+  .subtitle { margin-top:12px; color:var(--muted); font-size:12px; line-height:1.7; max-width:500px; }
+
+  /* DROP ZONE */
+  .upload-zone {
+    border:1.5px dashed var(--border); border-radius:16px; padding:44px 32px;
+    text-align:center; cursor:pointer; transition:border-color 0.2s, background 0.2s;
+    position:relative; margin-bottom:16px;
+  }
+  .upload-zone:hover, .upload-zone.drag-over { border-color:var(--accent); background:rgba(200,240,96,0.03); }
+  .upload-zone input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+  .upload-icon { font-size:32px; margin-bottom:14px; }
+  .upload-title { font-family:'Syne',sans-serif; font-size:17px; font-weight:700; margin-bottom:6px; }
+  .upload-sub { font-size:11px; color:var(--muted); line-height:1.7; }
+  .upload-sub strong { color:var(--text); }
+  .file-types { display:flex; gap:8px; justify-content:center; margin-top:16px; flex-wrap:wrap; }
+  .file-tag { font-size:10px; padding:4px 10px; border-radius:99px; border:1px solid var(--border); color:var(--muted); letter-spacing:0.05em; }
+
+  /* FILE PILLS */
+  .file-list { display:flex; flex-direction:column; gap:8px; margin-bottom:16px; }
+  .file-pill {
+    display:flex; align-items:center; gap:12px;
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:10px; padding:14px 18px;
+    animation: fadeUp 0.25s ease;
+  }
+  .pill-icon { font-size:22px; flex-shrink:0; }
+  .pill-info { flex:1; min-width:0; }
+  .pill-name { font-family:'Syne',sans-serif; font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pill-meta { font-size:10px; color:var(--muted); margin-top:3px; }
+  .pill-status { font-size:10px; padding:3px 10px; border-radius:99px; white-space:nowrap; }
+  .pill-status.pending { background:#1e1e22; color:var(--muted); }
+  .pill-status.processing { background:rgba(200,240,96,0.1); color:var(--accent); }
+  .pill-status.done { background:rgba(96,240,160,0.1); color:var(--c6); }
+  .pill-status.error { background:rgba(255,107,74,0.1); color:var(--accent2); }
+  .pill-remove { background:none; border:none; color:var(--muted); cursor:pointer; font-size:16px; padding:2px 6px; border-radius:4px; transition:color 0.15s; flex-shrink:0; }
+  .pill-remove:hover { color:var(--accent2); }
+
+  .add-more-btn {
+    width:100%; padding:11px; background:none; border:1px dashed var(--border);
+    border-radius:10px; color:var(--muted); font-family:'DM Mono',monospace;
+    font-size:11px; cursor:pointer; transition:all 0.2s; position:relative;
+    letter-spacing:0.05em; margin-bottom:16px;
+  }
+  .add-more-btn input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+  .add-more-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+  /* ANALYZE BTN */
+  .analyze-btn {
+    width:100%; padding:16px; background:var(--accent); color:#000; border:none;
+    border-radius:10px; font-family:'Syne',sans-serif; font-weight:700;
+    font-size:14px; letter-spacing:0.03em; cursor:pointer;
+    transition:opacity 0.2s, transform 0.1s; margin-bottom:8px;
+  }
+  .analyze-btn:hover { opacity:0.88; }
+  .analyze-btn:active { transform:scale(0.99); }
+  .analyze-btn:disabled { opacity:0.35; cursor:not-allowed; }
+
+  .privacy-note { font-size:10px; color:var(--muted); text-align:center; margin-top:6px; }
+
+  /* ERROR */
+  .error-box { display:none; background:rgba(255,107,74,0.07); border:1px solid rgba(255,107,74,0.25); border-radius:8px; padding:14px 18px; font-size:12px; color:var(--accent2); line-height:1.6; margin-top:12px; }
+  .error-box.active { display:block; }
+
+  /* LOADING */
+  .loading { display:none; padding:56px 0; text-align:center; }
+  .loading.active { display:block; }
+  .loading-text { font-size:11px; letter-spacing:0.15em; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
+  .loading-sub { font-size:11px; color:#333; margin-bottom:16px; }
+  .loading-bar { width:160px; height:2px; background:var(--border); border-radius:99px; margin:0 auto; overflow:hidden; }
+  .loading-bar-fill { height:100%; background:var(--accent); border-radius:99px; animation:loadbar 1.4s ease-in-out infinite; }
+  @keyframes loadbar { 0%{width:0%;margin-left:0} 50%{width:80%;margin-left:0} 100%{width:0%;margin-left:160px} }
+
+  /* RESULTS */
+  #results { display:none; }
+  #results.active { display:block; animation:fadeUp 0.5s ease; }
+  @keyframes fadeUp { from{opacity:0;transform:translateY(18px)} to{opacity:1;transform:translateY(0)} }
+
+  .section-label { font-size:10px; letter-spacing:0.15em; text-transform:uppercase; color:var(--accent); margin-bottom:18px; display:flex; align-items:center; gap:10px; }
+  .section-label::after { content:''; flex:1; height:1px; background:var(--border); }
+
+  .stats-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }
+  @media(max-width:520px){.stats-grid{grid-template-columns:1fr 1fr}}
+  .stat-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:18px 20px; }
+  .stat-label { font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted); margin-bottom:8px; }
+  .stat-value { font-family:'Syne',sans-serif; font-size:26px; font-weight:800; color:var(--accent); line-height:1; }
+  .stat-sub { font-size:11px; color:var(--muted); margin-top:5px; }
+
+  /* SOURCE TABS */
+  .source-tabs { display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
+  .source-tab { font-size:10px; padding:6px 14px; border-radius:99px; border:1px solid var(--border); background:none; color:var(--muted); cursor:pointer; font-family:'DM Mono',monospace; letter-spacing:0.05em; transition:all 0.15s; }
+  .source-tab.active { border-color:var(--accent); color:var(--accent); background:rgba(200,240,96,0.06); }
+
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:26px 28px; margin-bottom:14px; }
+
+  .category-row { margin-bottom:16px; }
+  .category-row:last-child { margin-bottom:0; }
+  .cat-header { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:7px; }
+  .cat-name { font-family:'Syne',sans-serif; font-size:13px; font-weight:600; }
+  .cat-right { display:flex; align-items:baseline; gap:6px; }
+  .cat-amount { font-size:13px; }
+  .cat-pct { font-size:10px; color:var(--muted); }
+  .bar-track { height:3px; background:var(--border); border-radius:99px; overflow:hidden; }
+  .bar-fill { height:100%; border-radius:99px; width:0; transition:width 1s cubic-bezier(0.16,1,0.3,1); }
+
+  .insight-item { padding:13px 0; border-bottom:1px solid var(--border); font-size:12px; line-height:1.75; color:#ccc; display:flex; gap:12px; align-items:flex-start; }
+  .insight-item:last-child { border-bottom:none; padding-bottom:0; }
+  .insight-icon { flex-shrink:0; font-size:15px; margin-top:1px; }
+
+  .txn-filter { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+  .filter-btn { font-size:10px; padding:5px 12px; border-radius:99px; border:1px solid var(--border); background:none; color:var(--muted); cursor:pointer; font-family:'DM Mono',monospace; letter-spacing:0.05em; transition:all 0.15s; }
+  .filter-btn.active, .filter-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+  .txn-row { display:flex; align-items:center; padding:10px 0; border-bottom:1px solid var(--border); gap:10px; font-size:11px; }
+  .txn-row:last-child { border-bottom:none; }
+  .txn-date { color:var(--muted); width:38px; flex-shrink:0; }
+  .txn-desc { flex:1; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .txn-source { font-size:9px; padding:2px 7px; border-radius:99px; background:#1a1a1e; color:#444; white-space:nowrap; flex-shrink:0; }
+  .txn-cat { font-size:10px; padding:3px 8px; border-radius:99px; background:#1c1c20; color:var(--muted); white-space:nowrap; }
+  .txn-amount { color:var(--accent2); white-space:nowrap; font-weight:500; }
+
+  .reset-btn { background:none; border:1px solid var(--border); color:var(--muted); padding:10px 22px; border-radius:8px; font-family:'DM Mono',monospace; font-size:11px; cursor:pointer; margin-top:20px; transition:all 0.2s; letter-spacing:0.04em; }
+  .reset-btn:hover { border-color:var(--accent); color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="eyebrow">Personal Finance</div>
+    <h1>All your cards,<br><span>one picture.</span></h1>
+    <p class="subtitle">Upload statements from every card or bank account — PDF, CSV, or screenshot. Everything gets merged into one combined breakdown.</p>
+  </header>
+
+  <div id="uploadArea">
+    <div class="upload-zone" id="dropZone">
+      <input type="file" id="fileInput" accept=".pdf,.csv,.txt,.png,.jpg,.jpeg,.webp" multiple onchange="handleFiles(this.files)">
+      <div class="upload-icon">📂</div>
+      <div class="upload-title">Drop your statements here</div>
+      <div class="upload-sub">or <strong>click to browse</strong> — select multiple files at once</div>
+      <div class="file-types">
+        <span class="file-tag">PDF</span>
+        <span class="file-tag">CSV</span>
+        <span class="file-tag">PNG / JPG</span>
+        <span class="file-tag">TXT</span>
+      </div>
+    </div>
+
+    <div class="file-list" id="fileList"></div>
+
+    <button class="add-more-btn" id="addMoreBtn" style="display:none">
+      <input type="file" accept=".pdf,.csv,.txt,.png,.jpg,.jpeg,.webp" multiple onchange="handleFiles(this.files)">
+      + Add another statement
+    </button>
+
+    <div id="errorBox" class="error-box"></div>
+    <button class="analyze-btn" id="analyzeBtn" onclick="analyze()" disabled>Add statements to analyze →</button>
+    <p class="privacy-note">Your files never leave your browser — processed privately, nothing stored.</p>
+  </div>
+
+  <div class="loading" id="loading">
+    <div class="loading-text" id="loadingText">Processing statements</div>
+    <div class="loading-sub" id="loadingSub"></div>
+    <div class="loading-bar"><div class="loading-bar-fill"></div></div>
+  </div>
+
+  <div id="results">
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Total spent</div>
+        <div class="stat-value" id="totalSpent">—</div>
+        <div class="stat-sub" id="txnCount">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Top category</div>
+        <div class="stat-value" id="biggestCat" style="font-size:17px;line-height:1.25;margin-top:2px">—</div>
+        <div class="stat-sub" id="biggestAmt">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Cards analyzed</div>
+        <div class="stat-value" id="cardCount">—</div>
+        <div class="stat-sub" id="periodLabel">—</div>
+      </div>
+    </div>
+
+    <div class="source-tabs" id="sourceTabs"></div>
+
+    <div class="card">
+      <div class="section-label">Breakdown by category</div>
+      <div id="categoryList"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-label">Key insights</div>
+      <div id="insightList"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-label">All transactions</div>
+      <div class="txn-filter" id="filterBtns"></div>
+      <div id="txnList"></div>
+    </div>
+
+    <button class="reset-btn" onclick="resetAll()">← Analyze different statements</button>
+  </div>
+</div>
+
+<script>
+let files = []; // [{file, id, name}]
+let allTransactions = [];
+let allSources = [];
+let nextId = 0;
+
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); });
+
+function handleFiles(fileList) {
+  Array.from(fileList).forEach(f => {
+    const id = nextId++;
+    files.push({ file: f, id, name: f.name });
+  });
+  renderFilePills();
+  updateAnalyzeBtn();
+}
+
+function removeFile(id) {
+  files = files.filter(f => f.id !== id);
+  renderFilePills();
+  updateAnalyzeBtn();
+}
+
+const fileIcons = { pdf:'📑', csv:'📊', txt:'📋', png:'🖼️', jpg:'🖼️', jpeg:'🖼️', webp:'🖼️' };
+
+function renderFilePills() {
+  const list = document.getElementById('fileList');
+  list.innerHTML = '';
+  files.forEach(({ file, id, name }) => {
+    const ext = name.split('.').pop().toLowerCase();
+    const icon = fileIcons[ext] || '📄';
+    list.innerHTML += `
+      <div class="file-pill" id="pill-${id}">
+        <span class="pill-icon">${icon}</span>
+        <div class="pill-info">
+          <div class="pill-name">${name}</div>
+          <div class="pill-meta">${formatSize(file.size)}</div>
+        </div>
+        <span class="pill-status pending" id="status-${id}">ready</span>
+        <button class="pill-remove" onclick="removeFile(${id})">×</button>
+      </div>`;
+  });
+  document.getElementById('addMoreBtn').style.display = files.length > 0 ? 'block' : 'none';
+  // Hide drop zone once files added
+  dropZone.style.display = files.length > 0 ? 'none' : 'block';
+}
+
+function updateAnalyzeBtn() {
+  const btn = document.getElementById('analyzeBtn');
+  if (files.length === 0) {
+    btn.disabled = true;
+    btn.textContent = 'Add statements to analyze →';
+    dropZone.style.display = 'block';
+  } else {
+    btn.disabled = false;
+    btn.textContent = files.length === 1
+      ? 'Analyze 1 statement →'
+      : `Analyze ${files.length} statements →`;
+  }
+}
+
+function formatSize(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+  return (b/(1024*1024)).toFixed(1) + ' MB';
+}
+
+async function fileToBase64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(',')[1]);
+    r.onerror = () => rej(new Error('Read failed'));
+    r.readAsDataURL(file);
+  });
+}
+
+async function fileToText(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = () => rej(new Error('Read failed'));
+    r.readAsText(file);
+  });
+}
+
+function setStatus(id, status, label) {
+  const el = document.getElementById(`status-${id}`);
+  if (!el) return;
+  el.className = `pill-status ${status}`;
+  el.textContent = label;
+}
+
+async function extractTransactions(file, id) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const isImage = ['png','jpg','jpeg','webp'].includes(ext);
+  const isPdf = ext === 'pdf';
+
+  const prompt = `Extract every debit/charge transaction from this bank or credit card statement.
+Return ONLY a JSON array — no markdown, no backticks, no explanation.
+Format: [{"date":"03/01","description":"Sweetgreen","amount":18.50}, ...]
+Rules: positive numbers only, skip credits/payments/refunds/balance transfers, skip if amount unclear.
+Return ONLY the JSON array.`;
+
+  let messages;
+  if (isImage) {
+    const b64 = await fileToBase64(file);
+    const mime = { png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', webp:'image/webp' }[ext];
+    messages = [{ role:'user', content:[{ type:'image', source:{ type:'base64', media_type:mime, data:b64 }},{ type:'text', text:prompt }]}];
+  } else if (isPdf) {
+    const b64 = await fileToBase64(file);
+    messages = [{ role:'user', content:[{ type:'document', source:{ type:'base64', media_type:'application/pdf', data:b64 }},{ type:'text', text:prompt }]}];
+  } else {
+    const text = await fileToText(file);
+    messages = [{ role:'user', content:`${prompt}\n\nStatement:\n${text.slice(0,40000)}` }];
+  }
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST', headers:{ 'Content-Type':'application/json' },
+    body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:4000, messages })
+  });
+  const d = await res.json();
+  if (d.error) throw new Error(d.error.message);
+  const raw = d.content?.map(b => b.text||'').join('') || '';
+  const clean = raw.replace(/```json|```/g,'').trim();
+  return JSON.parse(clean);
+}
+
+async function analyze() {
+  const btn = document.getElementById('analyzeBtn');
+  const loading = document.getElementById('loading');
+  const results = document.getElementById('results');
+  const errorBox = document.getElementById('errorBox');
+
+  btn.disabled = true;
+  errorBox.classList.remove('active');
+  document.getElementById('uploadArea').style.display = 'none';
+  loading.classList.add('active');
+  results.classList.remove('active');
+
+  try {
+    // Process each file, update status as we go
+    const allTxnsBySource = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const { file, id, name } = files[i];
+      document.getElementById('loadingText').textContent = `Processing ${name}`;
+      document.getElementById('loadingSub').textContent = `${i+1} of ${files.length} statements`;
+      setStatus(id, 'processing', 'reading…');
+
+      try {
+        const txns = await extractTransactions(file, id);
+        const sourceName = name.replace(/\.[^.]+$/, ''); // strip extension
+        txns.forEach(t => t.source = sourceName);
+        allTxnsBySource.push({ source: sourceName, txns });
+        setStatus(id, 'done', `${txns.length} txns`);
+      } catch (e) {
+        setStatus(id, 'error', 'failed');
+        // continue with other files
+      }
+    }
+
+    const combinedTxns = allTxnsBySource.flatMap(s => s.txns);
+    if (combinedTxns.length === 0) throw new Error('No transactions could be extracted from any file.');
+
+    // Pass 2: categorize + summarize all combined
+    document.getElementById('loadingText').textContent = 'Building combined breakdown';
+    document.getElementById('loadingSub').textContent = `${combinedTxns.length} total transactions`;
+
+    const summarizePrompt = `Given these transactions from multiple credit card/bank statements, categorize each one and return a combined summary.
+Transactions: ${JSON.stringify(combinedTxns)}
+
+Categories: Food & Dining, Groceries, Transport, Shopping, Nightlife & Bars, Subscriptions, Utilities, Health & Wellness, Entertainment, Travel, Rent & Housing, Coffee, Personal Care, Other.
+
+Return ONLY this JSON (no markdown, no backticks):
+{
+  "total": 1234.56,
+  "transaction_count": 25,
+  "period": "March 2024",
+  "days_in_period": 31,
+  "categories": [{"name":"Food & Dining","amount":320.50}],
+  "transactions": [{"date":"03/01","description":"Sweetgreen","amount":18.50,"category":"Food & Dining","source":"Chase Sapphire"}],
+  "insights": ["Insight 1 with specific numbers","Insight 2","Insight 3","Insight 4"]
+}
+insights: 3-5 specific, honest observations about spending patterns across all cards. Return ONLY valid JSON.`;
+
+    const res2 = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:4000, messages:[{ role:'user', content:summarizePrompt }]})
+    });
+    const d2 = await res2.json();
+    if (d2.error) throw new Error(d2.error.message);
+    const raw2 = d2.content?.map(b => b.text||'').join('') || '';
+    const clean2 = raw2.replace(/```json|```/g,'').trim();
+    const parsed = JSON.parse(clean2);
+
+    // Attach source names from original extraction
+    parsed.transactions = parsed.transactions || combinedTxns.map(t => ({...t, category:'Other'}));
+    allSources = [...new Set(combinedTxns.map(t => t.source))];
+
+    loading.classList.remove('active');
+    renderResults(parsed);
+    results.classList.add('active');
+
+  } catch (err) {
+    loading.classList.remove('active');
+    document.getElementById('uploadArea').style.display = 'block';
+    btn.disabled = false;
+    errorBox.textContent = `Something went wrong: ${err.message}`;
+    errorBox.classList.add('active');
+  }
+}
+
+const catColors = ['--c0','--c1','--c2','--c3','--c4','--c5','--c6','--c7'];
+
+function renderResults(data) {
+  allTransactions = data.transactions || [];
+
+  document.getElementById('totalSpent').textContent = '$' + (data.total||0).toFixed(2);
+  document.getElementById('txnCount').textContent = allTransactions.length + ' transactions';
+  document.getElementById('cardCount').textContent = files.length;
+  document.getElementById('periodLabel').textContent = data.period || 'this period';
+
+  const sorted = [...(data.categories||[])].sort((a,b) => b.amount - a.amount);
+  if (sorted[0]) {
+    document.getElementById('biggestCat').textContent = sorted[0].name;
+    document.getElementById('biggestAmt').textContent = '$' + sorted[0].amount.toFixed(2);
+  }
+
+  // Source tabs
+  const tabs = document.getElementById('sourceTabs');
+  tabs.innerHTML = '';
+  if (allSources.length > 1) {
+    tabs.innerHTML = `<button class="source-tab active" onclick="filterBySource('All',this)">All cards</button>`;
+    allSources.forEach(s => {
+      tabs.innerHTML += `<button class="source-tab" onclick="filterBySource('${s}',this)">${s}</button>`;
+    });
+  }
+
+  renderCategories(allTransactions, data.total);
+  renderInsights(data.insights);
+  renderFilterBtns(allTransactions);
+  renderTxns(allTransactions);
+}
+
+function filterBySource(source, btn) {
+  document.querySelectorAll('.source-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const txns = source === 'All' ? allTransactions : allTransactions.filter(t => t.source === source);
+  const total = txns.reduce((sum, t) => sum + (t.amount||0), 0);
+  renderCategories(txns, total);
+  renderFilterBtns(txns);
+  renderTxns(txns);
+}
+
+function renderCategories(txns, total) {
+  const catMap = {};
+  txns.forEach(t => { catMap[t.category] = (catMap[t.category]||0) + (t.amount||0); });
+  const sorted = Object.entries(catMap).sort((a,b) => b[1]-a[1]);
+  const grandTotal = total || txns.reduce((s,t)=>s+(t.amount||0),0) || 1;
+
+  const catList = document.getElementById('categoryList');
+  catList.innerHTML = '';
+  sorted.forEach(([name, amount], i) => {
+    const pct = ((amount / grandTotal) * 100).toFixed(1);
+    const color = `var(${catColors[i % catColors.length]})`;
+    catList.innerHTML += `
+      <div class="category-row">
+        <div class="cat-header">
+          <span class="cat-name" style="color:${color}">${name}</span>
+          <span class="cat-right">
+            <span class="cat-amount">$${amount.toFixed(2)}</span>
+            <span class="cat-pct">${pct}%</span>
+          </span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-fill" style="background:${color}" data-w="${pct}"></div>
+        </div>
+      </div>`;
+  });
+  requestAnimationFrame(() => {
+    document.querySelectorAll('.bar-fill').forEach(b => { b.style.width = '0'; requestAnimationFrame(() => b.style.width = b.dataset.w + '%'); });
+  });
+}
+
+function renderInsights(insights) {
+  const icons = ['📊','💡','⚠️','🔍','💸'];
+  const list = document.getElementById('insightList');
+  list.innerHTML = '';
+  (insights||[]).forEach((ins, i) => {
+    list.innerHTML += `<div class="insight-item"><span class="insight-icon">${icons[i%icons.length]}</span><span>${ins}</span></div>`;
+  });
+}
+
+function renderFilterBtns(txns) {
+  const cats = [...new Set(txns.map(t => t.category))];
+  const fb = document.getElementById('filterBtns');
+  fb.innerHTML = `<button class="filter-btn active" onclick="filterTxns('All',this)">All</button>`;
+  cats.forEach(c => {
+    fb.innerHTML += `<button class="filter-btn" onclick="filterTxns('${c}',this)">${c}</button>`;
+  });
+}
+
+function filterTxns(cat, btn) {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const filtered = cat === 'All' ? allTransactions : allTransactions.filter(t => t.category === cat);
+  renderTxns(filtered);
+}
+
+function renderTxns(txns) {
+  const list = document.getElementById('txnList');
+  list.innerHTML = '';
+  txns.forEach(t => {
+    list.innerHTML += `
+      <div class="txn-row">
+        <span class="txn-date">${t.date||'—'}</span>
+        <span class="txn-desc">${t.description}</span>
+        ${allSources.length > 1 ? `<span class="txn-source">${(t.source||'').split(' ').slice(-1)[0]}</span>` : ''}
+        <span class="txn-cat">${t.category}</span>
+        <span class="txn-amount">$${(t.amount||0).toFixed(2)}</span>
+      </div>`;
+  });
+}
+
+function resetAll() {
+  files = []; nextId = 0; allTransactions = []; allSources = [];
+  document.getElementById('fileList').innerHTML = '';
+  document.getElementById('fileInput').value = '';
+  document.getElementById('results').classList.remove('active');
+  document.getElementById('uploadArea').style.display = 'block';
+  document.getElementById('errorBox').classList.remove('active');
+  document.getElementById('addMoreBtn').style.display = 'none';
+  dropZone.style.display = 'block';
+  updateAnalyzeBtn();
+}
+</script>
+</body>
+</html>
