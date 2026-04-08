@@ -158,8 +158,13 @@
   .excluded-notice button { background:none; border:none; color:var(--accent3); font-family:'DM Mono',monospace; font-size:10px; cursor:pointer; padding:0; text-decoration:underline; }
   .txn-amount { color:var(--accent2); white-space:nowrap; font-weight:500; }
 
-  .reset-btn { background:none; border:1px solid var(--border); color:var(--muted); padding:10px 22px; border-radius:8px; font-family:'DM Mono',monospace; font-size:11px; cursor:pointer; margin-top:20px; transition:all 0.2s; letter-spacing:0.04em; }
+  .reset-btn { background:none; border:1px solid var(--border); color:var(--muted); padding:10px 22px; border-radius:8px; font-family:'DM Mono',monospace; font-size:11px; cursor:pointer; transition:all 0.2s; letter-spacing:0.04em; }
   .reset-btn:hover { border-color:var(--accent); color:var(--accent); }
+  .action-row { display:flex; gap:10px; margin-top:20px; flex-wrap:wrap; align-items:center; }
+  .export-btn { background:none; border:1px solid var(--border); color:var(--muted); padding:10px 22px; border-radius:8px; font-family:'DM Mono',monospace; font-size:11px; cursor:pointer; transition:all 0.2s; letter-spacing:0.04em; }
+  .export-btn.csv:hover { border-color:var(--accent); color:var(--accent); }
+  .export-btn.json:hover { border-color:var(--accent3); color:var(--accent3); }
+  .action-row .reset-btn { margin-left:auto; }
 
   /* PDF CONVERTER */
   .converter-wrap { border:1px solid var(--border); border-radius:14px; padding:26px 28px; margin-bottom:20px; }
@@ -266,7 +271,11 @@
       <div id="txnList"></div>
     </div>
 
-    <button class="reset-btn" onclick="resetAll()">← Analyze different statements</button>
+    <div class="action-row">
+      <button class="export-btn csv" onclick="exportCSV()">↓ Export CSV</button>
+      <button class="export-btn json" onclick="exportJSON()">↓ Export JSON</button>
+      <button class="reset-btn" onclick="resetAll()">← New analysis</button>
+    </div>
   </div>
 </div>
 
@@ -278,6 +287,7 @@ let nextId = 0;
 let amazonOrderMap = {}; // "MM/DD" → [{title, category, amount}]
 let excludedKeys = new Set();
 let activeSourceFilter = 'All';
+let lastResult = null;
 let activeCatFilter = 'All';
 
 const dropZone = document.getElementById('dropZone');
@@ -845,6 +855,7 @@ function refreshDisplay() {
 }
 
 function renderResults(data) {
+  lastResult = data;
   allTransactions = data.transactions || [];
   activeSourceFilter = 'All';
   activeCatFilter = 'All';
@@ -1113,8 +1124,44 @@ async function convertPdf(file) {
   }
 }
 
+function triggerDownload(filename, type, content) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], { type }));
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function exportCSV() {
+  const rows = [['Date','Description','Category','Source','Amount']];
+  allTransactions.forEach(t => {
+    if (excludedKeys.has(txnKey(t))) return;
+    rows.push([
+      t.date || '',
+      '"' + (t.description || '').replace(/"/g, '""') + '"',
+      t.category || '',
+      t.source || '',
+      (t.amount || 0).toFixed(2)
+    ]);
+  });
+  triggerDownload('spending-analysis.csv', 'text/csv', rows.map(r => r.join(',')).join('\n'));
+}
+
+function exportJSON() {
+  const payload = {
+    exported: new Date().toISOString(),
+    period: lastResult?.period || '',
+    total: lastResult?.total || 0,
+    transaction_count: allTransactions.length,
+    categories: lastResult?.categories || [],
+    insights: lastResult?.insights || [],
+    transactions: allTransactions.filter(t => !excludedKeys.has(txnKey(t)))
+  };
+  triggerDownload('spending-analysis.json', 'application/json', JSON.stringify(payload, null, 2));
+}
+
 function resetAll() {
-  files = []; nextId = 0; allTransactions = []; allSources = []; amazonOrderMap = {};
+  files = []; nextId = 0; allTransactions = []; allSources = []; amazonOrderMap = {}; lastResult = null;
   excludedKeys.clear(); activeSourceFilter = 'All'; activeCatFilter = 'All';
   document.getElementById('fileList').innerHTML = '';
   document.getElementById('fileInput').value = '';
