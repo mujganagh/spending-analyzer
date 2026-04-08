@@ -161,10 +161,30 @@
   .reset-btn { background:none; border:1px solid var(--border); color:var(--muted); padding:10px 22px; border-radius:8px; font-family:'DM Mono',monospace; font-size:11px; cursor:pointer; transition:all 0.2s; letter-spacing:0.04em; }
   .reset-btn:hover { border-color:var(--accent); color:var(--accent); }
   .action-row { display:flex; gap:10px; margin-top:20px; flex-wrap:wrap; align-items:center; }
-  .export-btn { background:none; border:1px solid var(--border); color:var(--muted); padding:10px 22px; border-radius:8px; font-family:'DM Mono',monospace; font-size:11px; cursor:pointer; transition:all 0.2s; letter-spacing:0.04em; }
-  .export-btn.csv:hover { border-color:var(--accent); color:var(--accent); }
-  .export-btn.json:hover { border-color:var(--accent3); color:var(--accent3); }
+  .save-btn { background:var(--accent); color:#000; border:none; padding:10px 22px; border-radius:8px; font-family:'DM Mono',monospace; font-size:11px; font-weight:500; cursor:pointer; transition:opacity 0.2s; letter-spacing:0.04em; }
+  .save-btn:hover { opacity:0.85; }
+  .compare-btn { background:none; border:1px solid var(--border); color:var(--muted); padding:10px 22px; border-radius:8px; font-family:'DM Mono',monospace; font-size:11px; cursor:pointer; transition:all 0.2s; letter-spacing:0.04em; position:relative; }
+  .compare-btn input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+  .compare-btn:hover { border-color:var(--accent3); color:var(--accent3); }
   .action-row .reset-btn { margin-left:auto; }
+
+  .compare-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:26px 28px; margin-bottom:14px; }
+  .compare-header { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:18px; flex-wrap:wrap; gap:8px; }
+  .compare-periods { font-size:11px; color:var(--muted); }
+  .compare-periods strong { color:var(--text); }
+  .compare-total { display:flex; gap:24px; padding:16px 0; border-bottom:1px solid var(--border); margin-bottom:18px; }
+  .compare-total-col { flex:1; }
+  .compare-total-label { font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
+  .compare-total-val { font-family:'Syne',sans-serif; font-size:22px; font-weight:800; color:var(--accent); }
+  .compare-delta { font-size:12px; margin-top:4px; }
+  .delta-up { color:var(--accent2); }
+  .delta-down { color:var(--c6); }
+  .compare-row { display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); font-size:11px; }
+  .compare-row:last-child { border-bottom:none; }
+  .compare-cat { flex:1; font-family:'Syne',sans-serif; font-size:12px; font-weight:600; }
+  .compare-prev { color:var(--muted); width:70px; text-align:right; }
+  .compare-curr { width:70px; text-align:right; }
+  .compare-chg { width:60px; text-align:right; font-size:10px; }
 
   /* PDF CONVERTER */
   .converter-wrap { border:1px solid var(--border); border-radius:14px; padding:26px 28px; margin-bottom:20px; }
@@ -271,9 +291,17 @@
       <div id="txnList"></div>
     </div>
 
+    <div id="compareCard" class="compare-card" style="display:none">
+      <div class="section-label">Comparison</div>
+      <div id="compareContent"></div>
+    </div>
+
     <div class="action-row">
-      <button class="export-btn csv" onclick="exportCSV()">↓ Export CSV</button>
-      <button class="export-btn json" onclick="exportJSON()">↓ Export JSON</button>
+      <button class="save-btn" onclick="saveReport()">↓ Save report</button>
+      <button class="compare-btn">
+        <input type="file" accept=".json" onchange="loadCompare(this.files[0])">
+        Compare with previous
+      </button>
       <button class="reset-btn" onclick="resetAll()">← New analysis</button>
     </div>
   </div>
@@ -1124,40 +1152,103 @@ async function convertPdf(file) {
   }
 }
 
-function triggerDownload(filename, type, content) {
+function saveReport() {
+  const activeTxns = allTransactions.filter(t => !excludedKeys.has(txnKey(t)));
+  const catMap = {};
+  activeTxns.forEach(t => { catMap[t.category] = (catMap[t.category]||0) + (t.amount||0); });
+  const total = activeTxns.reduce((s,t) => s + (t.amount||0), 0);
+
+  const report = {
+    _type: 'spending-report',
+    saved: new Date().toISOString(),
+    period: lastResult?.period || '',
+    total: parseFloat(total.toFixed(2)),
+    transaction_count: activeTxns.length,
+    sources: allSources,
+    categories: Object.entries(catMap).sort((a,b) => b[1]-a[1]).map(([name,amount]) => ({ name, amount: parseFloat(amount.toFixed(2)) })),
+    insights: lastResult?.insights || []
+  };
+
+  const period = (lastResult?.period || 'report').replace(/\s+/g, '-').toLowerCase();
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([content], { type }));
-  a.download = filename;
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type:'application/json' }));
+  a.download = `spending-${period}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
 
-function exportCSV() {
-  const rows = [['Date','Description','Category','Source','Amount']];
-  allTransactions.forEach(t => {
-    if (excludedKeys.has(txnKey(t))) return;
-    rows.push([
-      t.date || '',
-      '"' + (t.description || '').replace(/"/g, '""') + '"',
-      t.category || '',
-      t.source || '',
-      (t.amount || 0).toFixed(2)
-    ]);
-  });
-  triggerDownload('spending-analysis.csv', 'text/csv', rows.map(r => r.join(',')).join('\n'));
+function loadCompare(file) {
+  if (!file) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const prev = JSON.parse(r.result);
+      if (prev._type !== 'spending-report') { alert('Not a valid spending report file.'); return; }
+      renderComparison(prev);
+    } catch(e) { alert('Could not read report file.'); }
+  };
+  r.readAsText(file);
 }
 
-function exportJSON() {
-  const payload = {
-    exported: new Date().toISOString(),
-    period: lastResult?.period || '',
-    total: lastResult?.total || 0,
-    transaction_count: allTransactions.length,
-    categories: lastResult?.categories || [],
-    insights: lastResult?.insights || [],
-    transactions: allTransactions.filter(t => !excludedKeys.has(txnKey(t)))
-  };
-  triggerDownload('spending-analysis.json', 'application/json', JSON.stringify(payload, null, 2));
+function renderComparison(prev) {
+  const activeTxns = allTransactions.filter(t => !excludedKeys.has(txnKey(t)));
+  const currCatMap = {};
+  activeTxns.forEach(t => { currCatMap[t.category] = (currCatMap[t.category]||0) + (t.amount||0); });
+  const currTotal = activeTxns.reduce((s,t) => s + (t.amount||0), 0);
+
+  const prevCatMap = {};
+  (prev.categories||[]).forEach(c => { prevCatMap[c.name] = c.amount; });
+  const prevTotal = prev.total || 0;
+
+  const totalDelta = currTotal - prevTotal;
+  const totalPct = prevTotal ? ((totalDelta / prevTotal) * 100).toFixed(1) : null;
+  const deltaClass = totalDelta > 0 ? 'delta-up' : 'delta-down';
+  const deltaSign = totalDelta > 0 ? '+' : '';
+
+  // All categories from both reports
+  const allCats = [...new Set([...Object.keys(currCatMap), ...Object.keys(prevCatMap)])];
+  allCats.sort((a,b) => (currCatMap[b]||0) - (currCatMap[a]||0));
+
+  const rows = allCats.map(cat => {
+    const curr = currCatMap[cat] || 0;
+    const p = prevCatMap[cat] || 0;
+    const d = curr - p;
+    const sign = d > 0 ? '+' : '';
+    const cls = d > 0 ? 'delta-up' : d < 0 ? 'delta-down' : '';
+    return `<div class="compare-row">
+      <span class="compare-cat">${escHtml(cat)}</span>
+      <span class="compare-prev">${p ? '$'+p.toFixed(2) : '—'}</span>
+      <span class="compare-curr">$${curr.toFixed(2)}</span>
+      <span class="compare-chg ${cls}">${d !== 0 ? sign+'$'+Math.abs(d).toFixed(2) : '—'}</span>
+    </div>`;
+  }).join('');
+
+  document.getElementById('compareContent').innerHTML = `
+    <div class="compare-header">
+      <div class="compare-periods">Previous: <strong>${escHtml(prev.period||'unknown')}</strong></div>
+      <div class="compare-periods">Current: <strong>${escHtml(lastResult?.period||'this period')}</strong></div>
+    </div>
+    <div class="compare-total">
+      <div class="compare-total-col">
+        <div class="compare-total-label">Previous total</div>
+        <div class="compare-total-val" style="color:var(--muted)">$${prevTotal.toFixed(2)}</div>
+      </div>
+      <div class="compare-total-col">
+        <div class="compare-total-label">Current total</div>
+        <div class="compare-total-val">$${currTotal.toFixed(2)}</div>
+        ${totalPct !== null ? `<div class="compare-delta ${deltaClass}">${deltaSign}$${Math.abs(totalDelta).toFixed(2)} (${deltaSign}${totalPct}%)</div>` : ''}
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;padding:0 0 6px;border-bottom:1px solid var(--border)">
+      <span style="flex:1">Category</span>
+      <span style="width:70px;text-align:right">Previous</span>
+      <span style="width:70px;text-align:right">Current</span>
+      <span style="width:60px;text-align:right">Change</span>
+    </div>
+    ${rows}`;
+
+  document.getElementById('compareCard').style.display = 'block';
+  document.getElementById('compareCard').scrollIntoView({ behavior:'smooth', block:'nearest' });
 }
 
 function resetAll() {
@@ -1169,6 +1260,7 @@ function resetAll() {
   document.getElementById('uploadArea').style.display = 'block';
   document.getElementById('errorBox').classList.remove('active');
   document.getElementById('addMoreBtn').style.display = 'none';
+  document.getElementById('compareCard').style.display = 'none';
   dropZone.style.display = 'block';
   updateAnalyzeBtn();
 }
